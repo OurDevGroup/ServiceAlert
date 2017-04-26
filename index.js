@@ -19,6 +19,9 @@ const notify_number = config.notify_number;
 
 const default_priority = 2; //2 deviations from normal
 
+var needsAuth = true;
+var authCookies = null;
+
 function auth(user, pass, onAuth) {
     var https = require('https');
     var cookies = [];
@@ -86,9 +89,8 @@ function auth(user, pass, onAuth) {
     }); //fetch cookie
 } //auth
 
-function fetchServiceStatus(onStats) {
-    auth(config.user, config.password, (authCookies) => {
-        var options = {
+function fetch(authCookies, gotStats) {
+     var options = {
             hostname: instance,
             port: 443, //61835
             path: service_path,
@@ -121,8 +123,8 @@ function fetchServiceStatus(onStats) {
                         status.responseText.status.map((status) => {
                             if ((status.headStat.error_rate && status.headStat.error_rate > 0) ||
                                 (status.headStat.unavailable_rate && status.headStat.unavailable_rate > 0)) {
-                                if (onStats) {
-                                    onStats(status);
+                                if (gotStats) {
+                                    gotStats(status);
                                 }
                                 //console.log(status.id + " freaking sucks right now.");
                             }
@@ -132,70 +134,116 @@ function fetchServiceStatus(onStats) {
             }
         });
         req.end();
-    });
+}
+
+function fetchServiceStatus(gotStats) {
+    if(needsAuth || !authCookies) {
+        auth(config.user, config.password, (cookies) => {            
+            authCookies = cookies;
+            fetch(cookies, gotStats);
+        });
+    } else {
+        fetch(authCookies, gotStats);
+    }
 } //fetch status
 
 var runningStatus = {};
 var startTime = Date.now();
 
 function newStatCollection(defaults) {
-    var newObj = {
-        name: '',
-        priority: default_priority,
-        last_alert: 0,
-        stats: {}
-    }
+    var x = (defaults) => {
+        var statCol = new function () {    
+            this.name='';
 
-    for (k in defaults) {
-        newObj[k] = defaults[k];
-    }
+            this.ignore=false;
 
-    return newObj;
+            this.priority=default_priority;
+
+            this.last_alert=0;
+
+            this.stats =  {};
+        }
+
+        if(defaults){    
+            for (k in defaults) {
+                statCol[k] = defaults[k];
+            }
+        }
+
+        return statCol;
+    };
+
+    return x(defaults);
 }
 
-function newStat() {
-    return new function() {
-        this.default = null;
+function newStat(defaults) {
+    var x = (defaults) => {
+        var stat = new function() {
+            this.ignore = false;
 
-        this.direction = 1; //-1 for negative
-        this.getPreviousRate = () => {
-            return this.history.length > 1 ? this.history[this.history.length - 2] : this.default;
+            this.name = '';
+
+            this.default = null;
+
+            this.direction = 1; //-1 for negative
+
+            this.getPreviousRate = () => {
+                return this.history.length > 1 ? this.history[this.history.length - 2] : this.default;
+            };
+
+            this.getCurrentRate = () => {
+                return this.history.length > 0 ? this.history[this.history.length - 1] : this.default;
+            };
+
+            this._total = null;
+
+            this.getTotal = () => {
+                var total = 0;
+                this.history.map((v) => { total += v; });
+                this._total = total;
+                return total;
+            };
+
+            this._mean = null; 
+
+            this.getMean = () => {
+                var total = this.getTotal();
+                this._mean =  total / this.history.length;
+                return this._mean;
+            };
+
+            this._standardDeviation = null; 
+
+            this.getStandardDeviation = () => {
+                var mean = this.getMean();
+                var total = 0;
+                this.history.map((v) => {
+                    total += Math.pow(v - mean, 2);
+                });
+                this._standardDeviation = Math.sqrt(total / this.history.length);
+                return this._standardDeviation;
+            };
+
+            this.push = (val) => {
+                this.history.push(val);
+                if (this.history.length > maxData) {
+                    this.history.splice(0, this.history.length - maxData);
+                }
+                return val;
+            };
+
+            this.history = [];
         };
 
-        this.getCurrentRate = () => {
-            return this.history.length > 0 ? this.history[this.history.length - 1] : this.default;
-        };
-
-        this.getTotal = () => {
-            var total = 0;
-            this.history.map((v) => { total += v; });
-            return total;
-        };
-
-        this.getMean = () => {
-            var total = this.getTotal();
-            return total / this.history.length;
-        };
-
-        this.getStandardDeviation = () => {
-            var mean = this.getMean();
-            var total = 0;
-            this.history.map((v) => {
-                total += Math.pow(v - mean, 2);
-            });
-            return Math.sqrt(total / this.history.length);
-        };
-
-        this.push = (val) => {
-            this.history.push(val);
-            if (this.history.length > maxData) {
-                this.history.splice(0, this.history.length - maxData);
+        if(defaults) {
+            for(key in defaults) {
+                stat[key]=defaults[key];
             }
-            return val;
-        };
+        }
 
-        this.history = [];
+        return stat;
     };
+    return x(defaults);
 }
 
 function computeStats() {
@@ -205,21 +253,40 @@ function computeStats() {
         }
 
         var s = runningStatus[status.id];
+
+        if(s.ignore) return;
+
         var v = {};
         for (k in s.stats) {
-            if (s.stats[k].default)
+            if (s.stats[k].ignore) continue;
+            if (s.stats[k].default) {                
                 v[k] = s.stats[k].default;
+            }
         }
 
         for (k in status.headStat) {
+            if(s.stats[k] && s.stats[k].ignore) continue;
             v[k] = status.headStat[k];
         }
 
         for (k in v) {
-            if (!s.stats[k])
-                s.stats[k] = newStat();
+            if (!s.stats[k] || typeof s.stats[k] === 'undefined') {
+                if( config.services && 
+                    config.services[s.id] && 
+                    config.services[s.id].stats &&
+                    config.services[s.id].stats[k]) {                        
+                    s.stats[k] = newStat(config.services[s.id].stats[k]);
+                } else {
+                    s.stats[k] = newStat({name:k});
+                }
+            }
 
             s.stats[k].push(v[k]);
+
+            if(config.debug) {
+                var fs = require('fs');
+                fs.writeFileSync('./data.json', JSON.stringify(runningStatus, null, 2)  , 'utf-8');
+            }
 
             if (k == "error_rate" || k == "unavailable_rate") {
                 s.stats[k].default = 0;
@@ -234,16 +301,16 @@ function computeStats() {
         for (k in s.stats) {
             var stat = s.stats[k];
 
-            //don't bother checking unless you have a certain number of values
-            if (stat.history.length >= maxData * .5) return;
-
-            if (stat.getCurrentRate()) {
-                if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
-                    var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + k + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
-                    console.log(msg);
-                    if (s.last_alert + twilio_messageRate < Date.now()) {
-                        alert(msg);
-                        s.last_alert = Date.now();
+            //don't bother checking unless you have a certain number of values            
+            if (stat.history.length >= (maxData * .5)) {            
+                if (stat.getCurrentRate()) {
+                    if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
+                        var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + k + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
+                        console.log(msg);
+                        if (s.last_alert + twilio_messageRate < Date.now()) {
+                            alert(msg);
+                            s.last_alert = Date.now();
+                        }
                     }
                 }
             }
@@ -253,25 +320,29 @@ function computeStats() {
 }
 
 function alert(message) {
-    var twilio = require('twilio');
+    if(twilio_accountSid && twilio_authToken) {
+        var twilio = require('twilio');
+        var client = new twilio.RestClient(twilio_accountSid, twilio_authToken);
 
-    var client = new twilio.RestClient(twilio_accountSid, twilio_authToken);
-
-    client.messages.create({
-        body: message,
-        to: notify_number, // Text this number
-        from: twilio_number
-    }, function(err, message) {
-        if (err) {
-            console.error(err.message);
-        }
-    });
+        client.messages.create({
+            body: message,
+            to: notify_number, // Text this number
+            from: twilio_number
+        }, function(err, message) {
+            if (err) {
+                console.error(err.message);
+            }
+        });
+    }
 
 }
 
 function run() {
-    computeStats["kouponmedia.offersstate"] = newStatCollection({ name: "kouponmedia.offersstate", priority: 3 });
-    computeStats["kouponmedia.loyalty"] = newStatCollection({ name: "kouponmedia.loyalty", priority: 3 });
+    if(config.services) {
+        for(k in config.services) {
+            runningStatus[k] = newStatCollection(config.services[k]);
+        }
+    }
 
     setInterval(computeStats, queryInterval);
 };

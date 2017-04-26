@@ -9,5 +9,12 @@
     "twilio_authToken": "", //twilio auth token
     "twilio_number": "+15555551212", //twilio outbound number with sms support
     "twilio_messageRate": 120000,
-    "notify_number": "+15555551212" //number to send sevice alerts to
+    "notify_number": "+15555551212", //number to send sevice alerts to
+    "services":{ //optional
+        "demadware.service.id" : {
+            "name":"Friendly Service Name",
+            "priority":2,
+            "ignore":false
+        }
+    }
 }
