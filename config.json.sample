@@ -3,7 +3,8 @@
     "instance": "", //demandware instance name i.e. production-web-company.demandware.net
     "user":"", //biz manager user with access to service status
     "password":"", //biz manager password
-    "maxData": 100,
+    "maxData": 100, //largest amount of data to collect
+    "minData": 20, //smallest amount of data to collect before alerting
     "queryInterval": 20000,
     "twilio_accountSid": "",  //twilio account SID
     "twilio_authToken": "", //twilio auth token

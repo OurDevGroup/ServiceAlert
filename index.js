@@ -23,23 +23,18 @@ var needsAuth = true;
 var authCookies = null;
 
 function auth(user, pass, onAuth) {
+    if (!user || user.length == 0 || !pass || pass.length == 0) {
+        if (config.console) console.log("Unable to authenticate, missing username or password.");
+        return;
+    }
     var https = require('https');
-    var cookies = [];
-    https.get('https://' + instance + base_path, (res) => {
-        res.headers['set-cookie'].map((cookie) => {
-            var c = cookie.split(';');
-            c.map((cook) => {
-                var name = cook.substring(0, 4);
-                if (name == 'sid=')
-                    cookies.push(cook);
-                if (name == 'dwsi')
-                    cookies.push(cook);
-            });
-        });
+    if (config.console) console.log("Authenticating " + user + "...");
+    https.get('https://' + instance + ":" + (config.port || 443) + base_path, (res) => {
+        var cookies = parseCookies(res);
 
         var options = {
             hostname: instance,
-            port: 443,
+            port: config.port || 443,
             path: login_path,
             method: 'POST',
             headers: {
@@ -52,25 +47,26 @@ function auth(user, pass, onAuth) {
         }
 
         const req = https.request(options, (res) => {
+
+            res.on('data', (d) => {
+                process.stdout.write(d);
+            });
+
             if (res.statusCode == 302) {
-                cookies = [];
-                res.headers['set-cookie'].map((cookie) => {
-                    var c = cookie.split(';');
-                    c.map((cook) => {
-                        var name = cook.substring(0, 4);
-                        if (name == 'sid=')
-                            cookies.push(cook);
-                        if (name == 'dwsi')
-                            cookies.push(cook);
-                    });
-                });
+                if (config.console) console.log("User authenticated.");
+                var cookies = parseCookies(res);
                 if (onAuth) {
                     onAuth(cookies)
                 }
             } else {
-                console.log("Unable to login, check username & password!");
+                if (config.console) console.log("Unable to authenticate, check username & password!");
+                process.exit(1);
                 return;
             }
+        });
+
+        req.on('error', (e) => {
+            process.exit(1);
         });
 
         var querystring = require('querystring');
@@ -89,61 +85,98 @@ function auth(user, pass, onAuth) {
     }); //fetch cookie
 } //auth
 
-function fetch(authCookies, gotStats) {
-     var options = {
-            hostname: instance,
-            port: 443, //61835
-            path: service_path,
-            method: 'GET',
-            headers: {
-                'cookie': authCookies.join(';'),
-                'User-Agent': 'DemandwareServiceAlert',
-                'Accept': '*/*',
-            }
-        }
-
-        var https = require('https');
-        const req = https.request(options, (res) => {
-
-            var bodyChunks = [];
-            if (res.statusCode == 200) {
-                res.on('data', function(chunk) {
-                    bodyChunks.push(chunk);
-                });
-                res.on('end', function() {
-                    jsonResp = Buffer.concat(bodyChunks).toString();
-
-                    jsonResp = jsonResp.substring(2, jsonResp.length - 1);
-                    jsonResp = jsonResp.replace('responseStatus', '"responseStatus"');
-                    jsonResp = jsonResp.replace('responseText', '"responseText"');
-
-                    var status = JSON.parse(jsonResp);
-
-                    if (status && status.responseText.status.length > 0) {
-                        status.responseText.status.map((status) => {
-                            if ((status.headStat.error_rate && status.headStat.error_rate > 0) ||
-                                (status.headStat.unavailable_rate && status.headStat.unavailable_rate > 0)) {
-                                if (gotStats) {
-                                    gotStats(status);
-                                }
-                                //console.log(status.id + " freaking sucks right now.");
-                            }
-                        });
-                    }
-                });
-            }
+function parseCookies(res) {
+    if (!config.cookies) config.cookies = {};
+    if (!(res && res.headers && res.headers['set-cookie'])) return;
+    var setCookies = {};
+    res.headers['set-cookie'].map((cookie) => {
+        var c = cookie.split(';');
+        c.map((cookie) => {
+            var cookieName = cookie.split('=')[0];
+            if (cookieName == 'sid')
+                config.cookies[cookieName] = cookie;
+            if (cookieName == 'dwsid')
+                config.cookies[cookieName] = cookie;
+            if (cookieName.substring(0, "dwsecuretoken".length) == "dwsecuretoken")
+                config.cookies[cookieName] = cookie;
         });
-        req.end();
+    });
+    for (c in setCookies) {
+        config.cookies[c] = setCookies[c];
+    }
+
+    if (!config.cookies.toArray) {
+        config.cookies.toArray = () => {
+            var cookies = [];
+            for (k in config.cookies) {
+                if (typeof config.cookies[k] !== 'object' && typeof config.cookies[k] !== 'function')
+                    cookies.push(config.cookies[k]);
+            }
+            return cookies; //return cookie array
+        };
+    }
+
+    return config.cookies.toArray();
+}
+
+function fetch(authCookies, gotStats) {
+    var options = {
+        hostname: instance,
+        port: config.port || 443,
+        path: service_path,
+        method: 'GET',
+        headers: {
+            'cookie': authCookies.join(';'),
+            'User-Agent': 'DemandwareServiceAlert',
+            'Accept': '*/*',
+        }
+    }
+
+    if (config.console && config.verbose) console.log("Fetching stats.");
+
+    var https = require('https');
+    const req = https.request(options, (res) => {
+
+        var cookies = parseCookies(res);
+
+        var bodyChunks = [];
+        if (res.statusCode == 200) {
+            res.on('data', function(chunk) {
+                bodyChunks.push(chunk);
+            });
+            res.on('end', function() {
+                jsonResp = Buffer.concat(bodyChunks).toString();
+
+                jsonResp = jsonResp.substring(2, jsonResp.length - 1);
+                jsonResp = jsonResp.replace('responseStatus', '"responseStatus"');
+                jsonResp = jsonResp.replace('responseText', '"responseText"');
+
+                var status = JSON.parse(jsonResp);
+
+                if (status && status.responseText.status.length > 0) {
+                    status.responseText.status.map((status) => {
+                        if ((status.headStat.error_rate && status.headStat.error_rate > 0) ||
+                            (status.headStat.unavailable_rate && status.headStat.unavailable_rate > 0)) {
+                            if (gotStats) {
+                                gotStats(status);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+    });
+    req.end();
 }
 
 function fetchServiceStatus(gotStats) {
-    if(needsAuth || !authCookies) {
-        auth(config.user, config.password, (cookies) => {            
-            authCookies = cookies;
-            fetch(cookies, gotStats);
+    if (!config.authenticated || !config.cookies) {
+        auth(config.user, config.password, (cookies) => {
+            config.authenticated = true;
+            fetch(config.cookies.toArray(), gotStats);
         });
     } else {
-        fetch(authCookies, gotStats);
+        fetch(config.cookies.toArray(), gotStats);
     }
 } //fetch status
 
@@ -152,21 +185,21 @@ var startTime = Date.now();
 
 function newStatCollection(defaults) {
     var x = (defaults) => {
-        var statCol = new function () {    
-            this.name='';
+        var statCol = new function() {
+            this.name = '';
 
-            this.ignore=false;
+            this.ignore = false;
 
-            this.priority=default_priority;
+            this.priority = default_priority;
 
-            this.last_alert=0;
+            this.last_alert = 0;
 
-            this.stats =  {};
+            this.stats = {};
         }
 
-        if(defaults){    
+        if (defaults) {
             for (k in defaults) {
-                if(k != "stats") {
+                if (k != "stats") {
                     statCol[k] = defaults[k];
                 }
             }
@@ -206,15 +239,15 @@ function newStat(defaults) {
                 return total;
             };
 
-            this._mean = null; 
+            this._mean = null;
 
             this.getMean = () => {
                 var total = this.getTotal();
-                this._mean =  total / this.history.length;
+                this._mean = total / this.history.length;
                 return this._mean;
             };
 
-            this._standardDeviation = null; 
+            this._standardDeviation = null;
 
             this.getStandardDeviation = () => {
                 var mean = this.getMean();
@@ -237,9 +270,9 @@ function newStat(defaults) {
             this.history = [];
         };
 
-        if(defaults) {
-            for(key in defaults) {                
-                stat[key]=defaults[key];
+        if (defaults) {
+            for (key in defaults) {
+                stat[key] = defaults[key];
             }
         }
 
@@ -252,47 +285,47 @@ function computeStats() {
     fetchServiceStatus((status) => {
         if (!runningStatus[status.id]) {
             runningStatus[status.id] = newStatCollection({ name: status.id });
+            if (config.console && config.verbose) console.log("Logging " + status.id + " as new service.");
         }
 
         var s = runningStatus[status.id];
 
-        if(s.ignore) return;
+        if (s.ignore) return;
 
         var v = {};
         for (k in s.stats) {
             if (s.stats[k].ignore) continue;
-            if (s.stats[k].default) {                
+            if (s.stats[k].default) {
                 v[k] = s.stats[k].default;
             }
         }
 
         for (k in status.headStat) {
-            if(s.stats[k] && s.stats[k].ignore) continue;
+            if (s.stats[k] && s.stats[k].ignore) continue;
             v[k] = status.headStat[k];
         }
 
         for (k in v) {
-            
+
             if (!s.stats[k] || typeof s.stats[k] === 'undefined') {
-                if( config.services && 
-                    config.services[status.id] && 
+                if (config.services &&
+                    config.services[status.id] &&
                     config.services[status.id].stats &&
-                    config.services[status.id].stats[k]) {                        
+                    config.services[status.id].stats[k]) {
                     var d = config.services[status.id].stats[k];
-                    if(!d.name) d['name'] = k;
+                    if (!d.name) d['name'] = k;
                     s.stats[k] = newStat(d);
-                    
                 } else {
-                    s.stats[k] = newStat({name:k});
+                    s.stats[k] = newStat({ name: k });
                 }
+                if (config.console && config.verbose) console.log("Logging " + k + " as new metric for " + status.id + ".");
             }
 
             s.stats[k].push(v[k]);
+            if (config.console && config.verbose) console.log("Pushing " + v[k] + " to " + status.id + "." + k);
 
-            if(config.debug) {
-                var fs = require('fs');
-                fs.writeFileSync('./data.json', JSON.stringify(runningStatus, null, 2)  , 'utf-8');
-            }
+            var fs = require('fs');
+            fs.writeFileSync('./data.json', JSON.stringify(runningStatus, null, 2), 'utf-8');
 
             if (k == "error_rate" || k == "unavailable_rate") {
                 s.stats[k].default = 0;
@@ -308,19 +341,19 @@ function computeStats() {
             var stat = s.stats[k];
 
             //don't bother checking unless you have a certain number of values            
-            if (stat.history.length >= (maxData * .5)) {            
+            if (stat.history.length >= (config.minData || 20)) {
                 if ((stat.getPreviousRate() - stat.getCurrentRate()) * stat.direction < 0) {
                     if (stat.getCurrentRate()) {
                         if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
                             var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + stat.name + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
-                            console.log(msg);
+                            if (config.console) console.log(msg);
                             if (s.last_alert + twilio_messageRate < Date.now()) {
-                                //alert(msg);
+                                alert(msg);
                                 s.last_alert = Date.now();
                             }
                         }
                     }
-                } 
+                }
             }
         }
 
@@ -328,7 +361,9 @@ function computeStats() {
 }
 
 function alert(message) {
-    if(twilio_accountSid && twilio_authToken) {
+    if (!config.twilio) return;
+    if (config.console) console.log("Sending message to Twilio.");
+    if (twilio_accountSid && twilio_authToken) {
         var twilio = require('twilio');
         var client = new twilio.RestClient(twilio_accountSid, twilio_authToken);
 
@@ -345,14 +380,76 @@ function alert(message) {
 
 }
 
+function restoreState(prev) {
+    if (config.console) console.log("Restoring previous state.");
+    if (prev) {
+        for (svcName in prev) {
+            var svc = prev[svcName];
+
+            var defaults = {};
+            for (k in svc) {
+                if (typeof svc[k] !== 'object' && typeof svc[k] !== 'function') {
+                    defaults[k] = svc[k];
+                }
+            }
+            runningStatus[svcName] = newStatCollection(defaults);
+            if (svc['stats']) {
+                for (metricName in svc.stats) {
+                    var stat = svc.stats[metricName]; //error_rate                    
+                    defaults = {};
+                    for (k in stat) {
+                        if (typeof stat[k] !== 'object' && typeof stat[k] !== 'function') {
+                            defaults[k] = stat[k];
+                        }
+                    }
+                    runningStatus[svcName].stats[metricName] = newStat(defaults);
+                    if (stat.history) {
+                        for (h in stat.history) {
+                            runningStatus[svcName].stats[metricName].history.push(stat.history[h]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 function run() {
-    if(config.services) {
-        for(k in config.services) {
-            runningStatus[k] = newStatCollection(config.services[k]);
+    if (config.services && !config.restore) {
+        for (s in config.services) {
+            runningStatus[s] = newStatCollection(config.services[s]);
         }
     }
 
     setInterval(computeStats, queryInterval);
 };
+
+process.argv.forEach(function(val, index, array) {
+    switch (val) {
+        case "--help":
+            console.log("--help  \tHelp for the command line.\n--restore\tRestore previous data state instead of starting a new one.\n--console\tOutput information to the console window.\n--twilio\tSend messages via Twilio\n--verbose\tBe more verbose on messages.");
+            process.exit(1);
+            break;
+        case "--restore":
+            var fs = require('fs');
+            if (fs.existsSync('./data.json')) {
+                config.restore = true;
+                runningStatus = require('./data.json');
+                restoreState(runningStatus);
+            }
+            break;
+        case "--console":
+            config.console = true;
+            break;
+        case "--twilio":
+            config.twilio = true;
+            break;
+        case "--verbose":
+            config.verbose = true;
+            break;
+    }
+});
+
+if ((!config.instance || config.instance.length == 0) && config.console) console.log("Unable to log data, missing instance name.");
 
 run();
