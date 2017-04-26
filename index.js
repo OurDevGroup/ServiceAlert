@@ -166,7 +166,9 @@ function newStatCollection(defaults) {
 
         if(defaults){    
             for (k in defaults) {
-                statCol[k] = defaults[k];
+                if(k != "stats") {
+                    statCol[k] = defaults[k];
+                }
             }
         }
 
@@ -236,7 +238,7 @@ function newStat(defaults) {
         };
 
         if(defaults) {
-            for(key in defaults) {
+            for(key in defaults) {                
                 stat[key]=defaults[key];
             }
         }
@@ -270,12 +272,16 @@ function computeStats() {
         }
 
         for (k in v) {
+            
             if (!s.stats[k] || typeof s.stats[k] === 'undefined') {
                 if( config.services && 
-                    config.services[s.id] && 
-                    config.services[s.id].stats &&
-                    config.services[s.id].stats[k]) {                        
-                    s.stats[k] = newStat(config.services[s.id].stats[k]);
+                    config.services[status.id] && 
+                    config.services[status.id].stats &&
+                    config.services[status.id].stats[k]) {                        
+                    var d = config.services[status.id].stats[k];
+                    if(!d.name) d['name'] = k;
+                    s.stats[k] = newStat(d);
+                    
                 } else {
                     s.stats[k] = newStat({name:k});
                 }
@@ -303,16 +309,18 @@ function computeStats() {
 
             //don't bother checking unless you have a certain number of values            
             if (stat.history.length >= (maxData * .5)) {            
-                if (stat.getCurrentRate()) {
-                    if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
-                        var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + k + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
-                        console.log(msg);
-                        if (s.last_alert + twilio_messageRate < Date.now()) {
-                            alert(msg);
-                            s.last_alert = Date.now();
+                if ((stat.getPreviousRate() - stat.getCurrentRate()) * stat.direction < 0) {
+                    if (stat.getCurrentRate()) {
+                        if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
+                            var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + stat.name + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
+                            console.log(msg);
+                            if (s.last_alert + twilio_messageRate < Date.now()) {
+                                //alert(msg);
+                                s.last_alert = Date.now();
+                            }
                         }
                     }
-                }
+                } 
             }
         }
 

@@ -12,9 +12,15 @@
     "notify_number": "+15555551212", //number to send sevice alerts to
     "services":{ //optional
         "demadware.service.id" : {
-            "name":"Friendly Service Name",
+            "name":"Friendly Service Name", //everything is optional
             "priority":2,
-            "ignore":false
+            "ignore":false,
+            "stats": {
+                "mean": {
+                    "name":"Average Response Time",
+                    "ignore:true
+                }
+            }
         }
     }
 }
