@@ -1,0 +1,16 @@
+Demandware Service Framework Monitoring & Alert
+
+This NodeJS application is designed to monitor Demandware for abnormal behiavor and alert people of the behaivor.  This is particularly useful if you have critical services setup that rarely go down, but are essential to your operations.
+
+WARNING: This is very preliminary and is not very user friendly right now.
+
+Installation:
+1) Install NodeJS.
+2) Get a Twilio account and setup an SMS phone number.
+3) Clone this repo.
+4) Run 'npm install' to install all NodeJS dependencies.
+5) Rename config.json.sample to config.json.
+6) Change values in config.json to match your configuration and remove the comments.
+7) Run 'node index.js'
+
+Optionally you should install Forever if you want to have it run in the background.  You can also predefine services in the run() method to have a lower priority (useful if you have a service that fails a lot).
