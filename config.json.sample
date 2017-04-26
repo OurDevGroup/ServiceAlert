@@ -1,0 +1,13 @@
+//rename this file config.json and input the values below, remove comments
+{
+    "instance": "", //demandware instance name i.e. production-web-company.demandware.net
+    "user":"", //biz manager user with access to service status
+    "password":"", //biz manager password
+    "maxData": 100,
+    "queryInterval": 20000,
+    "twilio_accountSid": "",  //twilio account SID
+    "twilio_authToken": "", //twilio auth token
+    "twilio_number": "+15555551212", //twilio outbound number with sms support
+    "twilio_messageRate": 120000,
+    "notify_number": "+15555551212" //number to send sevice alerts to
+}
