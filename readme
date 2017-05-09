@@ -22,4 +22,3 @@ Run 'node index.js --help' for more commands.
 'node index.js --console --restore' will run the service watcher using existing data state and all service alerts will be outputted to the console window.
 
 'node index.js --twilio --restore --console' same as above but will send service alerts as SMS messages via Twilio.
-

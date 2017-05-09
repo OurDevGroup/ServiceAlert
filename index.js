@@ -20,163 +20,30 @@ const notify_number = config.notify_number;
 const default_priority = 2; //2 deviations from normal
 
 var needsAuth = true;
-var authCookies = null;
+var authCookies = [];
 
-function auth(user, pass, onAuth) {
-    if (!user || user.length == 0 || !pass || pass.length == 0) {
-        if (config.console) console.log("Unable to authenticate, missing username or password.");
-        return;
-    }
-    var https = require('https');
-    if (config.console) console.log("Authenticating " + user + "...");
-    https.get('https://' + instance + ":" + (config.port || 443) + base_path, (res) => {
-        var cookies = parseCookies(res);
+var request = require('request');
+var cookies = request.jar();
 
-        var options = {
-            hostname: instance,
-            port: config.port || 443,
-            path: login_path,
-            method: 'POST',
-            headers: {
-                'cookie': cookies.join(';'),
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'DemandwareServiceAlert',
-                'Accept': '*/*',
-                'content-length': '101'
-            }
-        }
+config.baseUri = 'https://' + instance + (config.port ? ":" + config.port : '');
+config.login_path = login_path;
+config.base_path = base_path;
+config.service_path = service_path;
 
-        const req = https.request(options, (res) => {
 
-            res.on('data', (d) => {
-                process.stdout.write(d);
-            });
-
-            if (res.statusCode == 302) {
-                if (config.console) console.log("User authenticated.");
-                var cookies = parseCookies(res);
-                if (onAuth) {
-                    onAuth(cookies)
-                }
-            } else {
-                if (config.console) console.log("Unable to authenticate, check username & password!");
-                process.exit(1);
-                return;
-            }
-        });
-
-        req.on('error', (e) => {
-            process.exit(1);
-        });
-
-        var querystring = require('querystring');
-
-        var data = querystring.stringify({
-            LoginForm_Password: pass,
-            LoginForm_Login: user,
-            LocaleID: '',
-            LoginForm_RegistrationDomain: 'Sites'
-        });
-
-        req.write(data);
-
-        req.end();
-
-    }); //fetch cookie
-} //auth
-
-function parseCookies(res) {
-    if (!config.cookies) config.cookies = {};
-    if (!(res && res.headers && res.headers['set-cookie'])) return;
-    var setCookies = {};
-    res.headers['set-cookie'].map((cookie) => {
-        var c = cookie.split(';');
-        c.map((cookie) => {
-            var cookieName = cookie.split('=')[0];
-            if (cookieName == 'sid')
-                config.cookies[cookieName] = cookie;
-            if (cookieName == 'dwsid')
-                config.cookies[cookieName] = cookie;
-            if (cookieName.substring(0, "dwsecuretoken".length) == "dwsecuretoken")
-                config.cookies[cookieName] = cookie;
-        });
-    });
-    for (c in setCookies) {
-        config.cookies[c] = setCookies[c];
-    }
-
-    if (!config.cookies.toArray) {
-        config.cookies.toArray = () => {
-            var cookies = [];
-            for (k in config.cookies) {
-                if (typeof config.cookies[k] !== 'object' && typeof config.cookies[k] !== 'function')
-                    cookies.push(config.cookies[k]);
-            }
-            return cookies; //return cookie array
-        };
-    }
-
-    return config.cookies.toArray();
-}
-
-function fetch(authCookies, gotStats) {
-    var options = {
-        hostname: instance,
-        port: config.port || 443,
-        path: service_path,
-        method: 'GET',
-        headers: {
-            'cookie': authCookies.join(';'),
-            'User-Agent': 'DemandwareServiceAlert',
-            'Accept': '*/*',
-        }
-    }
-
-    if (config.console && config.verbose) console.log("Fetching stats.");
-
-    var https = require('https');
-    const req = https.request(options, (res) => {
-
-        var cookies = parseCookies(res);
-
-        var bodyChunks = [];
-        if (res.statusCode == 200) {
-            res.on('data', function(chunk) {
-                bodyChunks.push(chunk);
-            });
-            res.on('end', function() {
-                jsonResp = Buffer.concat(bodyChunks).toString();
-
-                jsonResp = jsonResp.substring(2, jsonResp.length - 1);
-                jsonResp = jsonResp.replace('responseStatus', '"responseStatus"');
-                jsonResp = jsonResp.replace('responseText', '"responseText"');
-
-                var status = JSON.parse(jsonResp);
-
-                if (status && status.responseText.status.length > 0) {
-                    status.responseText.status.map((status) => {
-                        if ((status.headStat.error_rate && status.headStat.error_rate > 0) ||
-                            (status.headStat.unavailable_rate && status.headStat.unavailable_rate > 0)) {
-                            if (gotStats) {
-                                gotStats(status);
-                            }
-                        }
-                    });
-                }
-            });
-        }
-    });
-    req.end();
+function fetch(gotStats) {
+    var fetch = require('./service.js');
+    fetch(config, cookies, gotStats);
 }
 
 function fetchServiceStatus(gotStats) {
     if (!config.authenticated || !config.cookies) {
         auth(config.user, config.password, (cookies) => {
             config.authenticated = true;
-            fetch(config.cookies.toArray(), gotStats);
+            fetch(config.cookies, gotStats);
         });
     } else {
-        fetch(config.cookies.toArray(), gotStats);
+        fetch(config.cookies, gotStats);
     }
 } //fetch status
 
@@ -414,15 +281,7 @@ function restoreState(prev) {
     }
 }
 
-function run() {
-    if (config.services && !config.restore) {
-        for (s in config.services) {
-            runningStatus[s] = newStatCollection(config.services[s]);
-        }
-    }
 
-    setInterval(computeStats, queryInterval);
-};
 
 process.argv.forEach(function(val, index, array) {
     switch (val) {
@@ -450,6 +309,87 @@ process.argv.forEach(function(val, index, array) {
     }
 });
 
+function auth(username, password, onAuthenticated) {
+    const auth = require('./auth.js');
+    auth(config, cookies, username, password, onAuthenticated);
+}
+
+function fetchOrders(authCookies, gotOrders) {
+    var querystring = require('querystring');
+
+    var postData = querystring.stringify({
+        PageSize: 100,
+        CurrentPageNumber: 0
+    });
+
+    var options = {
+        hostname: instance,
+        port: config.port || 443,
+        path: '/on/demandware.store/Sites-Site/default/ViewOrderList_52-Dispatch',
+        method: 'POST',
+        headers: {
+            'cookie': authCookies.join(';'),
+            'User-Agent': 'DemandwareServiceAlert',
+            'Accept': '*/*',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': postData.length
+        }
+    }
+
+    var https = require('https');
+    const req = https.request(options, (res) => {
+
+        var bodyChunks = [];
+        if (res.statusCode == 200) {
+            res.on('data', function(chunk) {
+                bodyChunks.push(chunk);
+            });
+
+            res.on('end', function() {
+                bodyResp = Buffer.concat(bodyChunks).toString();
+
+                const cheerio = require('cheerio');
+                const $ = cheerio.load(bodyResp);
+
+                var fs = require('fs');
+                fs.writeFileSync('./test.html', bodyResp, 'utf-8');
+
+                console.log(bodyResp);
+            });
+        }
+    });
+
+    req.write(postData);
+
+    req.end();
+}
+
 if ((!config.instance || config.instance.length == 0) && config.console) console.log("Unable to log data, missing instance name.");
 
+if (!config.site && config.console) console.log("Unable to log order data, missing site name.");
+
+function run() {
+    if (config.services && !config.restore) {
+        for (s in config.services) {
+            runningStatus[s] = newStatCollection(config.services[s]);
+        }
+    }
+
+    setInterval(computeStats, queryInterval);
+};
+
 run();
+/*
+auth(config.user, config.password, () => {
+    console.log("authenticated");
+    var getSites = require('./site.js');
+    getSites(config, cookies, () => {
+        console.log('done');
+
+        var getOrders = require('./orders.js');
+        getOrders(config, cookies, (orders) => {
+            console.log(orders)
+        });
+
+    });
+});*/

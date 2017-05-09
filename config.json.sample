@@ -1,6 +1,7 @@
 //rename this file config.json and input the values below, remove comments
 {
     "instance": "", //demandware instance name i.e. production-web-company.demandware.net
+    "site":"", //demandware site friendly name i.e. "My Site US"
     "user":"", //biz manager user with access to service status
     "password":"", //biz manager password
     "maxData": 100, //largest amount of data to collect
