@@ -37,13 +37,14 @@ function fetch(gotStats) {
 }
 
 function fetchServiceStatus(gotStats) {
-    if (!config.authenticated || !config.cookies) {
-        auth(config.user, config.password, (cookies) => {
+    if (!config.authenticated) {
+        var auth = require('./auth.js');
+        auth(config, cookies, config.user, config.password, () => {
             config.authenticated = true;
-            fetch(config.cookies, gotStats);
+            fetch(gotStats);
         });
     } else {
-        fetch(config.cookies, gotStats);
+        fetch(gotStats);
     }
 } //fetch status
 
