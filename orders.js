@@ -5,7 +5,7 @@ module.exports = (config, cookies, onOrders) => {
     request.post({
         followAllRedirects: true,
         gzip: true,
-        url: config.baseUri + '/on/demandware.store/Sites-Site/default/ViewOrderList_52-Dispatch',
+        url: config.baseUri + config.order_path,
         form: {
             SearchType: 'simple',
             DatePattern: 'MM/dd/yyyy',

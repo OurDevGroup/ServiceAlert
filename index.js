@@ -6,6 +6,7 @@ var instance = config.instance;
 var login_path = '/on/demandware.store/Sites-Site/default/ViewApplication-ProcessLogin';
 var service_path = '/on/demandware.store/Sites-Site/default/ServiceAnalytics-FetchStatOverview';
 var base_path = '/on/demandware.store/Sites-Site/default/';
+var order_path = '/on/demandware.store/Sites-Site/default/ViewOrderList_52-Dispatch';
 
 const maxData = config.maxData;
 const queryInterval = config.queryInterval;
@@ -29,6 +30,7 @@ config.baseUri = 'https://' + instance + (config.port ? ":" + config.port : '');
 config.login_path = login_path;
 config.base_path = base_path;
 config.service_path = service_path;
+config.order_path = order_path;
 
 var _orderConfig = config.orders;
 config.orders = [];
@@ -364,56 +366,6 @@ process.argv.forEach(function(val, index, array) {
 function auth(username, password, onAuthenticated) {
     const auth = require('./auth.js');
     auth(config, cookies, username, password, onAuthenticated);
-}
-
-function fetchOrders(authCookies, gotOrders) {
-    var querystring = require('querystring');
-
-    var postData = querystring.stringify({
-        PageSize: 100,
-        CurrentPageNumber: 0
-    });
-
-    var options = {
-        hostname: instance,
-        port: config.port || 443,
-        path: '/on/demandware.store/Sites-Site/default/ViewOrderList_52-Dispatch',
-        method: 'POST',
-        headers: {
-            'cookie': authCookies.join(';'),
-            'User-Agent': 'DemandwareServiceAlert',
-            'Accept': '*/*',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Content-Length': postData.length
-        }
-    }
-
-    var https = require('https');
-    const req = https.request(options, (res) => {
-
-        var bodyChunks = [];
-        if (res.statusCode == 200) {
-            res.on('data', function(chunk) {
-                bodyChunks.push(chunk);
-            });
-
-            res.on('end', function() {
-                bodyResp = Buffer.concat(bodyChunks).toString();
-
-                const cheerio = require('cheerio');
-                const $ = cheerio.load(bodyResp);
-
-                var fs = require('fs');
-                fs.writeFileSync('./test.html', bodyResp, 'utf-8');
-
-                console.log(bodyResp);
-            });
-        }
-    });
-
-    req.write(postData);
-
-    req.end();
 }
 
 if ((!config.instance || config.instance.length == 0) && config.console) console.log("Unable to log data, missing instance name.");
