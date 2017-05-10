@@ -2,6 +2,7 @@
 {
     "instance": "", //demandware instance name i.e. production-web-company.demandware.net
     "site":"", //demandware site friendly name i.e. "My Site US"
+    "fetchOrders":true, //fetch order stats
     "user":"", //biz manager user with access to service status
     "password":"", //biz manager password
     "maxData": 100, //largest amount of data to collect
@@ -12,7 +13,13 @@
     "twilio_number": "+15555551212", //twilio outbound number with sms support
     "twilio_messageRate": 120000,
     "notify_number": "+15555551212", //number to send sevice alerts to
-    "services":{ //optional
+    "orders": { //settings for fetching orders
+        "active": true, //enable order fetching
+        "queryInterval": 60000 //how often to check for new orders
+    },    
+    "services":{
+        "active": true,  //enable service status fetching
+        "queryInterval": 5000 //fequency to check service status
         "demadware.service.id" : {
             "name":"Friendly Service Name", //everything is optional
             "priority":2,

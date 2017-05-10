@@ -11,7 +11,9 @@ module.exports = (config, cookies, onStat) => {
     }, (error, res, body) => {
         if (res.statusCode == 200) {
 
-            jsonResp = body.substring(2, jsonResp.length - 1);;
+            if (config.console && config.verbose) console.log("Got stats.");
+
+            var jsonResp = body.substring(2, body.length - 1);;
             jsonResp = jsonResp.replace('responseStatus', '"responseStatus"');
             jsonResp = jsonResp.replace('responseText', '"responseText"');
 

@@ -11,6 +11,8 @@ module.exports = (config, cookies, onSiteSelected) => {
             url: config.baseUri + '/on/demandware.store/Sites-Site/default/ViewApplication-SelectSite'
         }, (error, res, body) => {
             if (res.statusCode == 200) {
+                if (config.console && config.verbose) console.log("Got site list.");
+
                 const cheerio = require('cheerio');
                 const $ = cheerio.load(body);
 
@@ -40,6 +42,7 @@ module.exports = (config, cookies, onSiteSelected) => {
             url: config.baseUri + '/on/demandware.store/Sites-Site/default/ViewApplication-SelectSite?SelectedSiteID=' + config.sites[config.site]
         }, (error, res, body) => {
             if (res.statusCode == 200) {
+                if (config.console && config.verbose) console.log("Site set.");
                 const cheerio = require('cheerio');
                 const $ = cheerio.load(body);
 

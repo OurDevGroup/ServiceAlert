@@ -12,6 +12,7 @@
   "author": "Ryan Rife",
   "license": "ISC",
   "dependencies": {
+    "async": "^2.4.0",
     "cheerio": "^0.22.0",
     "cookies": "^0.7.0",
     "jsdom": "^10.1.0",

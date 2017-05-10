@@ -30,6 +30,15 @@ config.login_path = login_path;
 config.base_path = base_path;
 config.service_path = service_path;
 
+var _orderConfig = config.orders;
+config.orders = [];
+
+//converts order object to a collection
+if (_orderConfig) {
+    for (key in _orderConfig) {
+        config.orders[key] = _orderConfig[key];
+    }
+}
 
 function fetch(gotStats) {
     var fetch = require('./service.js');
@@ -149,83 +158,125 @@ function newStat(defaults) {
     return x(defaults);
 }
 
-function computeStats() {
-    fetchServiceStatus((status) => {
-        if (!runningStatus[status.id]) {
-            runningStatus[status.id] = newStatCollection({ name: status.id });
-            if (config.console && config.verbose) console.log("Logging " + status.id + " as new service.");
-        }
-
-        var s = runningStatus[status.id];
-
-        if (s.ignore) return;
-
-        var v = {};
-        for (k in s.stats) {
-            if (s.stats[k].ignore) continue;
-            if (s.stats[k].default) {
-                v[k] = s.stats[k].default;
+function getServiceStats() {
+    if (config.services.active) {
+        fetchServiceStatus((status) => {
+            if (!runningStatus[status.id]) {
+                runningStatus[status.id] = newStatCollection({ name: status.id });
+                if (config.console && config.verbose) console.log("Logging " + status.id + " as new service.");
             }
-        }
 
-        for (k in status.headStat) {
-            if (s.stats[k] && s.stats[k].ignore) continue;
-            v[k] = status.headStat[k];
-        }
+            var s = runningStatus[status.id];
 
-        for (k in v) {
+            if (s.ignore) return;
 
-            if (!s.stats[k] || typeof s.stats[k] === 'undefined') {
-                if (config.services &&
-                    config.services[status.id] &&
-                    config.services[status.id].stats &&
-                    config.services[status.id].stats[k]) {
-                    var d = config.services[status.id].stats[k];
-                    if (!d.name) d['name'] = k;
-                    s.stats[k] = newStat(d);
-                } else {
-                    s.stats[k] = newStat({ name: k });
+            var v = {};
+            for (k in s.stats) {
+                if (s.stats[k].ignore) continue;
+                if (s.stats[k].default) {
+                    v[k] = s.stats[k].default;
                 }
-                if (config.console && config.verbose) console.log("Logging " + k + " as new metric for " + status.id + ".");
             }
 
-            s.stats[k].push(v[k]);
-            if (config.console && config.verbose) console.log("Pushing " + v[k] + " to " + status.id + "." + k);
-
-            var fs = require('fs');
-            fs.writeFileSync('./data.json', JSON.stringify(runningStatus, null, 2), 'utf-8');
-
-            if (k == "error_rate" || k == "unavailable_rate") {
-                s.stats[k].default = 0;
-            } else {
-                s.stats[k].default = null;
+            for (k in status.headStat) {
+                if (s.stats[k] && s.stats[k].ignore) continue;
+                v[k] = status.headStat[k];
             }
 
-            if (k == "success_rate")
-                s.stats[k].direction = -1; //only care if the value is decreasing
-        }
+            for (k in v) {
 
-        for (k in s.stats) {
-            var stat = s.stats[k];
+                if (!s.stats[k] || typeof s.stats[k] === 'undefined') {
+                    if (config.services &&
+                        config.services[status.id] &&
+                        config.services[status.id].stats &&
+                        config.services[status.id].stats[k]) {
+                        var d = config.services[status.id].stats[k];
+                        if (!d.name) d['name'] = k;
+                        s.stats[k] = newStat(d);
+                    } else {
+                        s.stats[k] = newStat({ name: k });
+                    }
+                    if (config.console && config.verbose) console.log("Logging " + k + " as new metric for " + status.id + ".");
+                }
 
-            //don't bother checking unless you have a certain number of values            
-            if (stat.history.length >= (config.minData || 20)) {
-                if ((stat.getPreviousRate() - stat.getCurrentRate()) * stat.direction < 0) {
-                    if (stat.getCurrentRate()) {
-                        if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
-                            var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + stat.name + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
-                            if (config.console) console.log(msg);
-                            if (s.last_alert + twilio_messageRate < Date.now()) {
-                                alert(msg);
-                                s.last_alert = Date.now();
+                s.stats[k].push(v[k]);
+                if (config.console && config.verbose) console.log("Pushing " + v[k] + " to " + status.id + "." + k);
+
+                var fs = require('fs');
+                fs.writeFileSync('./data.json', JSON.stringify(runningStatus, null, 2), 'utf-8');
+
+                if (k == "error_rate" || k == "unavailable_rate") {
+                    s.stats[k].default = 0;
+                } else {
+                    s.stats[k].default = null;
+                }
+
+                if (k == "success_rate")
+                    s.stats[k].direction = -1; //only care if the value is decreasing
+            }
+
+            for (k in s.stats) {
+                var stat = s.stats[k];
+
+                //don't bother checking unless you have a certain number of values            
+                if (stat.history.length >= (config.minData || 20)) {
+                    if ((stat.getPreviousRate() - stat.getCurrentRate()) * stat.direction < 0) {
+                        if (stat.getCurrentRate()) {
+                            if (stat.getCurrentRate() - stat.getMean() > stat.getStandardDeviation() * s.priority) {
+                                var msg = s.name + " has an abnormal " + (stat.direction > 0 ? "increase" : "decrease") + " in " + stat.name + " with a value of " + Number(stat.getCurrentRate()).toFixed(6);
+                                if (config.console) console.log(msg);
+                                if (s.last_alert + twilio_messageRate < Date.now()) {
+                                    alert(msg);
+                                    s.last_alert = Date.now();
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-    });
+        });
+    }
+}
+
+function getOrderStats() {
+    var getOrders = function() {
+        if (config.site && config.orders.active) {
+            if (config.console && config.verbose) console.log("Fetching orders for site " + config.site + "...");
+
+            var getSites = require('./site.js');
+
+            getSites(config, cookies, () => {
+                if (config.console && config.verbose) console.log(config.site + " selected.");
+
+                var getOrders = require('./orders.js');
+                getOrders(config, cookies, (orders) => {
+                    if (config.console && config.verbose) console.log("Got orders.");
+
+                    orders.map((order) => {
+                        if (config.orders[order.number] == null) {
+                            config.orders.push(order);
+                            config.orders[order.number] = order;
+                        }
+                    });
+
+                    var fs = require('fs');
+                    fs.writeFileSync('./orders.json', JSON.stringify(config.orders, null, 2), 'utf-8');
+                });
+
+            });
+        }
+    }
+
+    if (!config.authenticated) {
+        var auth = require('./auth.js');
+        auth(config, cookies, config.user, config.password, () => {
+            config.authenticated = true;
+            getOrders();
+        });
+    } else {
+        getOrders();
+    }
 }
 
 function alert(message) {
@@ -372,25 +423,28 @@ if (!config.site && config.console) console.log("Unable to log order data, missi
 function run() {
     if (config.services && !config.restore) {
         for (s in config.services) {
-            runningStatus[s] = newStatCollection(config.services[s]);
+            if (typeof config.services[s] == 'object') {
+                runningStatus[s] = newStatCollection(config.services[s]);
+            }
         }
     }
 
-    setInterval(computeStats, queryInterval);
+    if (config.site && config.console) console.log("Ready to collect data.");
+
+    var async = require("async");
+    async.parallel([
+        function(callback) {
+            setInterval(getServiceStats, config.services.queryInterval || 5000);
+        },
+        function(callback) {
+            setInterval(getOrderStats, config.orders.queryInterval || 60000);
+        }
+    ], function(err) {
+        console.log('ERROR: Could not start scheduler!');
+    });
+
+
+
 };
 
 run();
-/*
-auth(config.user, config.password, () => {
-    console.log("authenticated");
-    var getSites = require('./site.js');
-    getSites(config, cookies, () => {
-        console.log('done');
-
-        var getOrders = require('./orders.js');
-        getOrders(config, cookies, (orders) => {
-            console.log(orders)
-        });
-
-    });
-});*/
